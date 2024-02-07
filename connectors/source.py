@@ -8,7 +8,7 @@
 
 import asyncio
 import importlib
-import re
+import re, os
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from decimal import Decimal
@@ -37,6 +37,10 @@ from connectors.utils import (
     get_file_extension,
     hash_id,
 )
+from connectors.utils.grobid import (
+    pdf_parser as parse_pdf,
+    FILE_SIZE_LIMIT,
+)
 
 CHUNK_SIZE = 1024 * 64  # 64KB default SSD page size
 CURSOR_SYNC_TIMESTAMP = "cursor_timestamp"
@@ -64,6 +68,8 @@ TYPE_DEFAULTS = {
     bool: None,
     list: [],
 }
+
+
 
 
 class ValidationTypes(Enum):
@@ -407,7 +413,7 @@ class BaseDataSource:
             self.download_dir = None
 
         # this will be overwritten by set_framework_config()
-        self.framework_config = DataSourceFrameworkConfig.Builder().build()
+        self.framework_config = DataSourceFrameworkConfig.Builder().with_max_file_size(FILE_SIZE_LIMIT).build()
 
     def __str__(self):
         return f"Datasource `{self.__class__.name}`"
@@ -817,17 +823,30 @@ class BaseDataSource:
             - `body` if local content extraction was used
             - `_attachment` if pipeline extraction will be used
         """
-        if self.configuration.get("use_text_extraction_service"):
-            if self.extraction_service._check_configured():
-                doc["body"] = await self.extraction_service.extract_text(
-                    temp_filename, source_filename
+        # if self.configuration.get("use_text_extraction_service"):
+        #     if self.extraction_service._check_configured():
+        #         doc["body"] = await self.extraction_service.extract_text(
+        #             temp_filename, source_filename
+        #         )
+        # else:
+        #     self._logger.debug(f"Calling convert_to_b64 for file : {source_filename}")
+        #     await asyncio.to_thread(convert_to_b64, source=temp_filename)
+        #     async with aiofiles.open(file=temp_filename, mode="r") as async_buffer:
+        #         # base64 on macOS will add a EOL, so we strip() here
+        #         doc["_attachment"] = (await async_buffer.read()).strip()
+                
+        name = temp_filename.rsplit('/')[-1]
+        
+        if name.endswith(".pdf"):
+            f1 = open(temp_filename, "rb")
+            files = dict(
+                file = (
+                    name, f1,
+                    'application/pdf'
+                    )
                 )
-        else:
-            self._logger.debug(f"Calling convert_to_b64 for file : {source_filename}")
-            await asyncio.to_thread(convert_to_b64, source=temp_filename)
-            async with aiofiles.open(file=temp_filename, mode="r") as async_buffer:
-                # base64 on macOS will add a EOL, so we strip() here
-                doc["_attachment"] = (await async_buffer.read()).strip()
+            doc = await parse_pdf(files, doc)
+            f1.close()    
 
         return doc
 

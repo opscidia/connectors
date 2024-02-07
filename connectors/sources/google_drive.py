@@ -795,10 +795,17 @@ class GoogleDriveDataSource(BaseDataSource):
             doc = await self.handle_file_content_extraction(
                 {}, file_name, async_buffer.name
             )
-            attachment = doc.get("_attachment")
+            # attachment = doc.get("_attachment")
             body = doc.get("body")
+            output = {}
+            for field in ['authors', 'title', 'abstract', 'sections']:
+                if field in doc:
+                    output[field] = doc[field]
+            output['body'] = body
+            output['file_size'] = file_size
+                    
 
-        return attachment, body, file_size
+        return output
 
     async def get_google_workspace_content(self, client, file, timestamp=None):
         """Exports Google Workspace documents to an allowed file type and extracts its text content.
@@ -826,7 +833,7 @@ class GoogleDriveDataSource(BaseDataSource):
             "_id": file_id,
             "_timestamp": file["_timestamp"],
         }
-        attachment, body, file_size = await self._download_content(
+        body = await self._download_content(
             file=file,
             file_extension=file_extension,
             download_func=partial(
@@ -843,13 +850,16 @@ class GoogleDriveDataSource(BaseDataSource):
         #    into text/plain format. We usually we end up with tiny .txt files.
         # 2. Google will ofter report the Google Workspace shared documents to have size 0
         #    as they don't count against user's storage quota.
-        if not self.is_file_size_within_limit(file_size, file_name):
+        if not self.is_file_size_within_limit(body['file_size'], file_name):
             return
+        for field in body:
+            if body[field] is not None:
+                document[field] = body[field]
 
-        if attachment is not None:
-            document["_attachment"] = attachment
-        elif body is not None:
-            document["body"] = body
+        # if attachment is not None:
+        #     document["_attachment"] = attachment
+        # elif body is not None:
+        #     document["body"] = body
 
         return document
 
@@ -882,7 +892,7 @@ class GoogleDriveDataSource(BaseDataSource):
             "_id": file_id,
             "_timestamp": file["_timestamp"],
         }
-        attachment, body, _ = await self._download_content(
+        body = await self._download_content(
             file=file,
             file_extension=file_extension,
             download_func=partial(
@@ -894,11 +904,10 @@ class GoogleDriveDataSource(BaseDataSource):
                 alt="media",
             ),
         )
+        for field, value in body.items():
+            if value is not None:
+                document[field] = value
 
-        if attachment is not None:
-            document["_attachment"] = attachment
-        elif body is not None:
-            document["body"] = body
 
         return document
 

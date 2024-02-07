@@ -12,8 +12,8 @@ from connectors.logger import logger
 DEFAULT_ELASTICSEARCH_MAX_RETRIES = 5
 DEFAULT_ELASTICSEARCH_RETRY_INTERVAL = 10
 
-DEFAULT_MAX_FILE_SIZE = 10485760  # 10MB
-
+# DEFAULT_MAX_FILE_SIZE = 10485760  # 10MB
+DEFAULT_MAX_FILE_SIZE = 1048576000 # 1000MB
 
 def load_config(config_file):
     logger.info(f"Loading config from {config_file}")
