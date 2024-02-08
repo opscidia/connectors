@@ -16,7 +16,7 @@ VERSION=$(shell cat connectors/VERSION)
 install:
 	$(PYTHON) -m pip install --upgrade pip
 	$(PYTHON) -m pip install -r requirements/$(ARCH).txt
-	$(PYTHON) setup.py develo
+	$(PYTHON) setup.py develop
 
 # bin/elastic-ingest: bin/python
 # 	bin/pip install -r requirements/$(ARCH).txt
