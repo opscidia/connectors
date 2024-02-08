@@ -1171,4 +1171,5 @@ class GoogleDriveDataSource(BaseDataSource):
                     paths=resolved_paths,
                     seen_ids=seen_ids,
                 ):
-                    yield file, partial(self.get_content, google_drive_client, file)
+                    if file['file_extension'] == 'pdf':
+                        yield file, partial(self.get_content, google_drive_client, file)
