@@ -7,15 +7,20 @@ SLOW_TEST_THRESHOLD=1 # seconds
 VERSION=$(shell cat connectors/VERSION)
 
 
-bin/python:
-	$(PYTHON) -m venv .
-	bin/pip install --upgrade pip
+# bin/python:
+# 	$(PYTHON) -m venv .
+# 	bin/pip install --upgrade pip
 
-install: bin/python bin/elastic-ingest
+# install: bin/python bin/elastic-ingest
 
-bin/elastic-ingest: bin/python
-	bin/pip install -r requirements/$(ARCH).txt
-	bin/python setup.py develop
+install:
+	$(PYTHON) -m pip install --upgrade pip
+	$(PYTHON) -m pip install -r requirements/$(ARCH).txt
+	$(PYTHON) setup.py develo
+
+# bin/elastic-ingest: bin/python
+# 	bin/pip install -r requirements/$(ARCH).txt
+# 	bin/python setup.py develop
 
 bin/black: bin/python
 	bin/pip install -r requirements/$(ARCH).txt
@@ -65,7 +70,8 @@ ftrace: bin/pytest bin/elastic-ingest
 	PERF8_TRACE=true tests/ftest.sh $(NAME) $(PERF8)
 
 run: install
-	bin/elastic-ingest
+	$(PYTHON) -m elastic_ingest
+	# bin/elastic-ingest
 
 default-config: install
 	bin/elastic-ingest --action config --service-type $(SERVICE_TYPE)
