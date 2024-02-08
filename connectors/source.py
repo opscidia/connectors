@@ -37,7 +37,7 @@ from connectors.utils import (
     get_file_extension,
     hash_id,
 )
-from connectors.utils.grobid import (
+from connectors.sources.grobid import (
     pdf_parser as parse_pdf,
     FILE_SIZE_LIMIT,
 )
