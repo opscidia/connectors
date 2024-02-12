@@ -844,9 +844,10 @@ class BaseDataSource:
         if name.endswith(".pdf"):
             f1 = open(temp_filename, "rb")
             files = dict(
-                file = (
+                input = (
                     name, f1,
-                    'application/pdf'
+                    'application/pdf',
+                    {'Expires': '0'}
                     )
                 )
             doc = await parse_pdf(files, doc)

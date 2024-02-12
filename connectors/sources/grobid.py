@@ -49,7 +49,12 @@ async def pdf_parser(files, doc):
     authors_list = []
     structure = []
     try:
-        response = requests.post(GROBID_URL, files=files,  verify=False)
+        headers = dict(Accept = 'application/xml')
+        response = requests.post(
+            GROBID_URL,
+            files=files,
+            headers=headers,
+            timeout=60)
         if response.status_code == 200:
             response_data = response.json()
         else:
