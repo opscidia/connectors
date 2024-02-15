@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from grobid_tei_xml.types import (
     GrobidDocument as BaseDocument
 )
-from pydantic import Schema, Field
+from pydantic import BaseModel, Field
 from typing import Optional, Any
 
 
@@ -15,7 +15,7 @@ class GrobidSection:
     n: Optional[str] = None
     embeddings: Optional[list[float]] = field(default_factory=list)
 
-class Section(Schema):
+class Section(BaseModel):
     title: str
     content: Optional[str] = None
     n: Optional[str] = None
@@ -32,7 +32,7 @@ class GrobidFullText:
     content: dict[str, GrobidSection]
     structure: list[dict[str, Any]]
 
-class FullText(Schema):
+class FullText(BaseModel):
     content: dict[str, Section]
     structure: list[dict[str, Any]] = Field(
         [],
@@ -49,7 +49,7 @@ class GrobidDocument(BaseDocument):
 
 
 
-class Address(Schema):
+class Address(BaseModel):
     addr_line: Optional[str] = None
     post_code: Optional[str] = None
     settlement: Optional[str] = None
@@ -58,7 +58,7 @@ class Address(Schema):
 
 
 
-class Affiliation(Schema):
+class Affiliation(BaseModel):
     institution: Optional[str] = None
     department: Optional[str] = None
     laboratory: Optional[str] = None
@@ -67,7 +67,7 @@ class Affiliation(Schema):
 
 
 
-class Author(Schema):
+class Author(BaseModel):
     full_name: Optional[str]
     given_name: Optional[str] = None
     middle_name: Optional[str] = None
@@ -79,7 +79,7 @@ class Author(Schema):
 
 
 
-class Biblio(Schema):
+class Biblio(BaseModel):
     authors: list[Author]
     index: Optional[int] = None
     id: Optional[str] = None
@@ -115,7 +115,7 @@ class Biblio(Schema):
 
 
 
-class Document(Schema):
+class Document(BaseModel):
     header: Biblio = Field(
         ...,
         description="Bibliographical metadata extracted from the document"
