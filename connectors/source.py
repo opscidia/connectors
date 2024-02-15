@@ -839,19 +839,24 @@ class BaseDataSource:
         #         # base64 on macOS will add a EOL, so we strip() here
         #         doc["_attachment"] = (await async_buffer.read()).strip()
                 
-        name = temp_filename.rsplit('/')[-1]
+        # name = temp_filename.rsplit('/')[-1]
         
-        if name.endswith(".pdf"):
-            f1 = open(temp_filename, "rb")
-            files = dict(
-                input = (
-                    name, f1,
-                    'application/pdf',
-                    {'Expires': '0'}
-                    )
-                )
-            doc = await parse_pdf(files, doc)
-            f1.close()    
+        # if name.endswith(".pdf"):
+        #     f1 = open(temp_filename, "rb")
+        #     files = dict(
+        #         input = (
+        #             name, f1,
+        #             'application/pdf',
+        #             {'Expires': '0'}
+        #             )
+        #         )
+        try:
+            doc = await parse_pdf(temp_filename, doc)
+        except Exception as e:
+            self._logger.warning(
+                f"Could not extract content from PDF: {temp_filename}. Error: {e}"
+            )
+            # f1.close()    
 
         return doc
 
