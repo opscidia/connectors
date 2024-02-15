@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from grobid_tei_xml.types import (
     GrobidDocument as BaseDocument
 )
-from ninja import Schema, Field
+from pydantic import Schema, Field
 from typing import Optional, Any
 
 
