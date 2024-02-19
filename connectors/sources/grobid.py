@@ -245,10 +245,10 @@ async def pdf_parser(filename, doc):
     authors_list = []
     structure = []
     try:
-        response_data = GrobidParser.parse_pdf(filename)
+        response_data = GrobidParser.parse_pdf(filename).to_dict()
         if not response_data:
             return doc
-        authors_json = response_data['header'].to_dict()
+        authors_json = response_data['header']
         
         for k, v in authors_json.items():
             if k in ['authors']:
