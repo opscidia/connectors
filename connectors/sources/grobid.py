@@ -1,4 +1,4 @@
-import os, requests
+import os, requests, traceback
 import re
 from grobid_tei_xml.parse import (
     _string_to_tree,
@@ -268,6 +268,7 @@ async def pdf_parser(filename, doc):
         doc['abstract'] = response_data['abstract'] if 'abstract' in response_data else None
     except Exception as e:
         print(f'Error parsing pdf: {e}')
+        traceback.print_exc()
         
     return doc
                 
