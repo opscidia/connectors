@@ -232,20 +232,14 @@ def extract_structure(x):
 def extract_sections(d,names):
     sections=[]
     for name in names:
-        import copy
-        dc = copy.deepcopy(d)
         key1 = ("content", name, "title")
         try: title = get_value_nested_dict(d, key1)
-        except Exception as e:
-            print(f'Error extracting title')
-            print(dc)
-            raise e
+        except KeyError: title = None
+        
         key2 = ("content", name, "content")
         try: content = get_value_nested_dict(d, key2)
-        except Exception as e:
-            print(f'Error extracting content')
-            print(dc)
-            raise e
+        except KeyError: content = None
+
         dictio = {'title':title, 'content':content}
         sections.append(dictio)
     return sections
