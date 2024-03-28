@@ -1094,7 +1094,7 @@ class GoogleDriveDataSource(BaseDataSource):
         for file in prepared_files:
             yield file
 
-    async def get_docs(self, filtering=None):
+    async def get_docs(self, filtering=None, index_name=None):
         """Executes the logic to fetch Google Drive objects in an async manner.
 
         Args:
@@ -1172,4 +1172,6 @@ class GoogleDriveDataSource(BaseDataSource):
                     seen_ids=seen_ids,
                 ):
                     if file['file_extension'] == 'pdf':
-                        yield file, partial(self.get_content, google_drive_client, file)
+                        path = file['path'].split('/') if file.get('path') else None
+                        if path and len(path) > 1 and path[-2] == index_name:
+                            yield file, partial(self.get_content, google_drive_client, file)

@@ -449,7 +449,8 @@ class SyncJobRunner:
         match [self.sync_job.job_type, skip_unchanged_documents]:
             case [JobType.FULL, _]:
                 async for doc, lazy_download in self.data_provider.get_docs(
-                    filtering=self.sync_job.filtering
+                    filtering=self.sync_job.filtering,
+                    index_name=self.sync_job.index_name
                 ):
                     yield doc, lazy_download, OP_INDEX
             case [JobType.INCREMENTAL, optimization] if optimization is False:
@@ -464,7 +465,8 @@ class SyncJobRunner:
                     yield doc, lazy_download, operation
             case [JobType.INCREMENTAL, optimization] if optimization is True:
                 async for doc, lazy_download in self.data_provider.get_docs(
-                    filtering=self.sync_job.filtering
+                    filtering=self.sync_job.filtering,
+                    index_name=self.sync_job.index_name
                 ):
                     yield doc, lazy_download, OP_INDEX
             case [JobType.ACCESS_CONTROL, _]:

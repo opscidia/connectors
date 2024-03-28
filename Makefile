@@ -66,7 +66,7 @@ ftrace: bin/pytest bin/elastic-ingest
 	PERF8_TRACE=true tests/ftest.sh $(NAME) $(PERF8)
 
 run: install
-	bin/elastic-ingest
+	bin/elastic-ingest -c configs/config_$(index_name).yml
 
 default-config: install
 	bin/elastic-ingest --action config --service-type $(SERVICE_TYPE)
