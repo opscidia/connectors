@@ -13,9 +13,7 @@ bin/python:
 
 install: bin/python bin/elastic-ingest
 
-bin/elastic-ingest: bin/python
-	bin/pip install -r requirements/$(ARCH).txt
-	bin/pip install -r requirements/app.txt
+bin/elastic-ingest:
 	bin/python setup.py develop
 
 bin/black: bin/python
