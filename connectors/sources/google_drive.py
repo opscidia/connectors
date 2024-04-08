@@ -1160,6 +1160,9 @@ class GoogleDriveDataSource(BaseDataSource):
             resolved_paths = await self.resolve_paths()
 
             google_drive_client = self.google_drive_client()
+            
+            # get organization name
+            org_name = index_name.replace('search-', '')
 
             # sync anything shared with the service account
             async for files_page in google_drive_client.list_files(
@@ -1172,6 +1175,7 @@ class GoogleDriveDataSource(BaseDataSource):
                     seen_ids=seen_ids,
                 ):
                     if file['file_extension'] == 'pdf':
-                        path = file['path'].split('/') if file.get('path') else None
-                        if path and len(path) > 1 and path[-2] == index_name:
+                        path = file['path'].split('/') if file.get('path') else []
+                        path = [p.lower() for p in path]
+                        if org_name and path and org_name in path:
                             yield file, partial(self.get_content, google_drive_client, file)
