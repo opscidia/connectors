@@ -1176,6 +1176,6 @@ class GoogleDriveDataSource(BaseDataSource):
                 ):
                     if file['file_extension'] == 'pdf':
                         path = file['path'].split('/') if file.get('path') else []
-                        path = [p.lower() for p in path]
+                        path = [p.lower().replace(' ', '-') for p in path]
                         if org_name and path and org_name in path:
                             yield file, partial(self.get_content, google_drive_client, file)
