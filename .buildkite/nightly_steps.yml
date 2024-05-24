@@ -1,3 +1,6 @@
+env:
+  DOCKERFILE_FTEST_PATH: "Dockerfile.ftest.wolfi"
+
 steps:
   - label: "🔨 MySQL"
     command:
@@ -122,5 +125,15 @@ steps:
   - label: "🔨 Redis"
     command:
       - ".buildkite/run_nigthly.sh redis"
+    artifact_paths:
+      - "perf8-report-*/**/*"
+  - label: "🔨 GraphQL"
+    command:
+      - ".buildkite/run_nigthly.sh graphql"
+    artifact_paths:
+      - "perf8-report-*/**/*"
+  - label: "🔨 Opentext Documentum"
+    command:
+      - ".buildkite/run_nigthly.sh opentext_documentum"
     artifact_paths:
       - "perf8-report-*/**/*"

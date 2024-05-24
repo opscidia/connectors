@@ -132,9 +132,9 @@ def sync_orchestrator_mock():
         sync_orchestrator_mock.prepare_content_index = AsyncMock()
         sync_orchestrator_mock.async_bulk = AsyncMock()
         sync_orchestrator_mock.done = Mock(return_value=True)
-        sync_orchestrator_mock.fetch_error = Mock(return_value=None)
+        sync_orchestrator_mock.get_error = Mock(return_value=None)
         sync_orchestrator_mock.cancel = AsyncMock()
-        sync_orchestrator_mock.ingestion_stats = Mock()
+        sync_orchestrator_mock.ingestion_stats = Mock(return_value={})
         sync_orchestrator_mock.close = AsyncMock()
         sync_orchestrator_mock.has_active_license_enabled = AsyncMock(
             return_value=(True, License.PLATINUM)
@@ -431,7 +431,7 @@ async def test_async_bulk_error(job_type, sync_cursor, sync_orchestrator_mock):
         "indexed_document_volume": 0,
         "deleted_document_count": 0,
     }
-    sync_orchestrator_mock.fetch_error.return_value = error
+    sync_orchestrator_mock.get_error.return_value = error
     sync_orchestrator_mock.ingestion_stats.return_value = ingestion_stats
     sync_job_runner = create_runner(job_type=job_type, sync_cursor=sync_cursor)
     await sync_job_runner.execute()
@@ -1091,3 +1091,57 @@ async def test_native_acl_connector_sync_fails_when_api_key_invalid(
     sync_job_runner.connector.sync_done.assert_awaited_with(
         sync_job_runner.sync_job, cursor=None
     )
+
+
+@pytest.mark.parametrize(
+    "sync_job_config,pipeline_config,expected_enabled,expected_log",
+    [
+        (
+            {"use_text_extraction_service": True},
+            {"extract_binary_content": True},
+            True,
+            "Binary content extraction via local extraction service is enabled for",
+        ),
+        (
+            {"use_text_extraction_service": True},
+            {"extract_binary_content": False},
+            True,
+            "Binary content extraction via local extraction service is enabled for",
+        ),
+        (
+            {"use_text_extraction_service": False},
+            {"extract_binary_content": True},
+            True,
+            "Binary content extraction via pipelines is enabled for",
+        ),
+        (
+            {"use_text_extraction_service": False},
+            {"extract_binary_content": False},
+            False,
+            "Binary content extraction is disabled for",
+        ),
+        (
+            {"foo": "bar"},
+            {"faa": "bor"},
+            False,
+            "Binary content extraction is disabled for",
+        ),
+    ],
+)
+def test_content_extraction_enabled(
+    sync_job_config, pipeline_config, expected_enabled, expected_log, patch_logger
+):
+    sync_job_runner = create_runner()
+
+    class MockDataSource(BaseDataSource):
+        def __init__(self, config):
+            pass
+
+    assert (
+        sync_job_runner._content_extraction_enabled(
+            sync_job_config=sync_job_config,
+            pipeline_config=pipeline_config,
+        )
+        is expected_enabled
+    )
+    patch_logger.assert_present(expected_log)

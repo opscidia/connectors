@@ -18,9 +18,17 @@ from connectors.es import Mappings
 from connectors.es.management_client import ESManagementClient
 from connectors.es.settings import Settings
 from connectors.es.sink import (
+    BIN_DOCS_DOWNLOADED,
+    BULK_OPERATIONS,
+    BULK_RESPONSES,
+    CREATES_QUEUED,
+    DELETES_QUEUED,
+    DOCS_EXTRACTED,
     OP_DELETE,
     OP_INDEX,
-    OP_UPSERT,
+    OP_UPDATE,
+    RESULT_SUCCESS,
+    UPDATES_QUEUED,
     AsyncBulkRunningError,
     ElasticsearchOverloadedError,
     Extractor,
@@ -29,12 +37,19 @@ from connectors.es.sink import (
     SyncOrchestrator,
 )
 from connectors.protocol import JobType, Pipeline
+from connectors.protocol.connectors import (
+    DELETED_DOCUMENT_COUNT,
+    INDEXED_DOCUMENT_COUNT,
+    INDEXED_DOCUMENT_VOLUME,
+)
 from tests.commons import AsyncIterator
 
 INDEX = "some-index"
 TIMESTAMP = datetime.datetime(year=2023, month=1, day=1)
 NO_FILTERING = ()
 DOC_ONE_ID = 1
+DOC_TWO_ID = 2
+DOC_THREE_ID = 3
 
 DOC_ONE = {"_id": DOC_ONE_ID, "_timestamp": TIMESTAMP}
 
@@ -46,10 +61,34 @@ DOC_ONE_DIFFERENT_TIMESTAMP = {
 DOC_TWO = {"_id": 2, "_timestamp": TIMESTAMP}
 DOC_THREE = {"_id": 3, "_timestamp": TIMESTAMP}
 
+BULK_ACTION_ERROR = "some error"
+
 SYNC_RULES_ENABLED = True
 SYNC_RULES_DISABLED = False
 CONTENT_EXTRACTION_ENABLED = True
 CONTENT_EXTRACTION_DISABLED = False
+
+
+def failed_bulk_action(doc_id, action, result, error=BULK_ACTION_ERROR):
+    return {action: {"_id": doc_id, "result": result, "error": error}}
+
+
+def successful_bulk_action(doc_id, action, result):
+    return {action: {"_id": doc_id, "result": result}}
+
+
+def successful_action_log_message(doc_id, action, result):
+    return f"Successfully executed '{action}' on document with id '{doc_id}'. Result: {result}"
+
+
+def successful_operation_with_non_successful_result_log_message(doc_id, action, result):
+    return f"Executed '{action}' on document with id '{doc_id}', but got non-successful result: {result}"
+
+
+def failed_action_log_message(doc_id, action, result, error=BULK_ACTION_ERROR):
+    return (
+        f"Failed to execute '{action}' on document with id '{doc_id}'. Error: {error}"
+    )
 
 
 @pytest.mark.asyncio
@@ -300,14 +339,20 @@ async def test_async_bulk(mock_responses):
     ingestion_stats = es.ingestion_stats()
 
     assert ingestion_stats == {
-        "doc_created": 1,
-        "attachment_extracted": 1,
-        "doc_updated": 1,
-        "doc_deleted": 1,
-        "bulk_operations": {"index": 2, "delete": 1},
-        "indexed_document_count": 2,
-        "indexed_document_volume": ANY,
-        "deleted_document_count": 1,
+        CREATES_QUEUED: 1,
+        BIN_DOCS_DOWNLOADED: 1,
+        UPDATES_QUEUED: 1,
+        DELETES_QUEUED: 1,
+        f"{BULK_OPERATIONS}.{OP_INDEX}": 2,
+        f"{BULK_OPERATIONS}.{OP_DELETE}": 1,
+        INDEXED_DOCUMENT_COUNT: 2,
+        INDEXED_DOCUMENT_VOLUME: ANY,
+        DELETED_DOCUMENT_COUNT: 1,
+        f"{BULK_RESPONSES}.{OP_DELETE}": 1,
+        f"{BULK_RESPONSES}.{OP_INDEX}": 1,
+        f"{BULK_RESPONSES}.{OP_UPDATE}": 1,
+        DOCS_EXTRACTED: 2,
+        RESULT_SUCCESS: 3,
     }
 
     # 2nd sync
@@ -561,7 +606,7 @@ async def setup_extractor(
             [Exception()],
             SYNC_RULES_ENABLED,
             CONTENT_EXTRACTION_ENABLED,
-            ["FETCH_ERROR"],
+            ["EXTRACTOR_ERROR"],
             updated(0),
             created(0),
             deleted(0),
@@ -700,10 +745,10 @@ async def test_get_docs(
 
         await extractor.run(doc_generator, JobType.FULL)
 
-        assert extractor.total_docs_updated == expected_total_docs_updated
-        assert extractor.total_docs_created == expected_total_docs_created
-        assert extractor.total_docs_deleted == expected_total_docs_deleted
-        assert extractor.total_downloads == expected_total_downloads
+        assert extractor.counters.get(UPDATES_QUEUED) == expected_total_docs_updated
+        assert extractor.counters.get(CREATES_QUEUED) == expected_total_docs_created
+        assert extractor.counters.get(DELETES_QUEUED) == expected_total_docs_deleted
+        assert extractor.counters.get(BIN_DOCS_DOWNLOADED) == expected_total_downloads
 
         assert queue_called_with_operations(queue, expected_queue_operations)
 
@@ -788,7 +833,7 @@ async def test_get_docs(
             [Exception()],
             SYNC_RULES_ENABLED,
             CONTENT_EXTRACTION_ENABLED,
-            ["FETCH_ERROR"],
+            ["EXTRACTOR_ERROR"],
             updated(0),
             created(0),
             deleted(0),
@@ -877,10 +922,10 @@ async def test_get_docs_incrementally(
 
         await extractor.run(doc_generator, JobType.INCREMENTAL)
 
-        assert extractor.total_docs_updated == expected_total_docs_updated
-        assert extractor.total_docs_created == expected_total_docs_created
-        assert extractor.total_docs_deleted == expected_total_docs_deleted
-        assert extractor.total_downloads == expected_total_downloads
+        assert extractor.counters.get(UPDATES_QUEUED) == expected_total_docs_updated
+        assert extractor.counters.get(CREATES_QUEUED) == expected_total_docs_created
+        assert extractor.counters.get(DELETES_QUEUED) == expected_total_docs_deleted
+        assert extractor.counters.get(BIN_DOCS_DOWNLOADED) == expected_total_downloads
 
         assert queue_called_with_operations(queue, expected_queue_operations)
 
@@ -982,9 +1027,9 @@ async def test_get_access_control_docs(
 
     await extractor.run(doc_generator, JobType.ACCESS_CONTROL)
 
-    assert extractor.total_docs_updated == expected_total_docs_updated
-    assert extractor.total_docs_created == expected_total_docs_created
-    assert extractor.total_docs_deleted == expected_total_docs_deleted
+    assert extractor.counters.get(UPDATES_QUEUED) == expected_total_docs_updated
+    assert extractor.counters.get(CREATES_QUEUED) == expected_total_docs_created
+    assert extractor.counters.get(DELETES_QUEUED) == expected_total_docs_deleted
 
     assert queue_called_with_operations(queue, expected_queue_operations)
 
@@ -1085,9 +1130,18 @@ def test_bulk_populate_stats(res, expected_result):
     )
     sink._populate_stats(deepcopy(STATS), res)
 
-    assert sink.indexed_document_count == expected_result["indexed_document_count"]
-    assert sink.indexed_document_volume == expected_result["indexed_document_volume"]
-    assert sink.deleted_document_count == expected_result["deleted_document_count"]
+    assert (
+        sink.counters.get(INDEXED_DOCUMENT_COUNT)
+        == expected_result[INDEXED_DOCUMENT_COUNT]
+    )
+    assert (
+        sink.counters.get(INDEXED_DOCUMENT_VOLUME)
+        == expected_result[INDEXED_DOCUMENT_VOLUME]
+    )
+    assert (
+        sink.counters.get(DELETED_DOCUMENT_COUNT)
+        == expected_result[DELETED_DOCUMENT_COUNT]
+    )
 
 
 @pytest.mark.asyncio
@@ -1119,9 +1173,43 @@ async def test_batch_bulk_with_retry():
         client.client.bulk = AsyncMock(
             side_effect=[first_call_error, second_call_result]
         )
-        await sink._batch_bulk([], {OP_INDEX: {}, OP_UPSERT: {}, OP_DELETE: {}})
+        await sink._batch_bulk([], {OP_INDEX: {}, OP_UPDATE: {}, OP_DELETE: {}})
 
         assert client.client.bulk.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_batch_bulk_with_errors(patch_logger):
+    config = {
+        "username": "elastic",
+        "password": "changeme",
+        "host": "http://nowhere.com:9200",
+    }
+    client = ESManagementClient(config)
+    client.client = AsyncMock()
+    sink = Sink(
+        client=client,
+        queue=None,
+        chunk_size=0,
+        pipeline={"name": "pipeline"},
+        chunk_mem_size=0,
+        max_concurrency=0,
+        max_retries=3,
+        retry_interval=10,
+    )
+
+    with mock.patch.object(asyncio, "sleep"):
+        error = {
+            "type": "illegal_argument_exception",
+            "reason": "if _id is specified it must not be empty",
+        }
+        mock_result = {
+            "errors": True,
+            "items": [{"index": {"_id": "1", "error": error}}],
+        }
+        client.client.bulk = AsyncMock(return_value=mock_result)
+        await sink._batch_bulk([], {OP_INDEX: {"1": 20}, OP_UPDATE: {}, OP_DELETE: {}})
+        patch_logger.assert_present(f"operation index failed, {error}")
 
 
 @pytest.mark.parametrize(
@@ -1362,4 +1450,187 @@ async def test_extractor_run_when_mem_full_is_raised():
     await extractor.run(doc_generator, JobType.FULL)
 
     queue.clear.assert_called_once()
-    assert isinstance(extractor.fetch_error, ElasticsearchOverloadedError)
+    assert isinstance(extractor.error, ElasticsearchOverloadedError)
+
+
+@pytest.mark.asyncio
+async def test_should_not_log_bulk_operations_if_doc_id_tracing_is_disabled(
+    patch_logger,
+):
+    action = "create"
+    result = "created"
+    operations = []
+    client = Mock()
+    client.bulk_insert = AsyncMock(
+        return_value={"items": [successful_bulk_action(DOC_ONE_ID, action, result)]}
+    )
+    sink = Sink(
+        client=client,
+        queue=Mock(),
+        chunk_size=0,
+        pipeline={"name": "pipeline"},
+        chunk_mem_size=0,
+        max_concurrency=0,
+        max_retries=3,
+        retry_interval=10,
+        enable_bulk_operations_logging=False,
+    )
+
+    await sink._batch_bulk(operations, STATS)
+
+    patch_logger.assert_not_present(
+        successful_action_log_message(DOC_ONE_ID, action, result)
+    )
+
+
+@pytest.mark.parametrize(
+    "operation_results, expected_logs",
+    [
+        (
+            [successful_bulk_action(DOC_ONE_ID, "create", "created")],
+            [successful_action_log_message(DOC_ONE_ID, "create", "created")],
+        ),
+        (
+            [successful_bulk_action(DOC_ONE_ID, "delete", "deleted")],
+            [successful_action_log_message(DOC_ONE_ID, "delete", "deleted")],
+        ),
+        (
+            [successful_bulk_action(DOC_ONE_ID, "index", "created")],
+            [successful_action_log_message(DOC_ONE_ID, "index", "created")],
+        ),
+        (
+            [successful_bulk_action(DOC_ONE_ID, "update", "updated")],
+            [successful_action_log_message(DOC_ONE_ID, "update", "updated")],
+        ),
+        (
+            [successful_bulk_action(DOC_ONE_ID, "delete", "not_found")],
+            [
+                successful_operation_with_non_successful_result_log_message(
+                    DOC_ONE_ID, "delete", "not_found"
+                )
+            ],
+        ),
+        (
+            [failed_bulk_action(DOC_ONE_ID, "create", "not_found")],
+            [failed_action_log_message(DOC_ONE_ID, "create", "not_found")],
+        ),
+        (
+            [failed_bulk_action(DOC_ONE_ID, "delete", "not_found")],
+            [failed_action_log_message(DOC_ONE_ID, "delete", "not_found")],
+        ),
+        (
+            [failed_bulk_action(DOC_ONE_ID, "index", "not_found")],
+            [failed_action_log_message(DOC_ONE_ID, "index", "not_found")],
+        ),
+        (
+            [failed_bulk_action(DOC_ONE_ID, "update", "not_found")],
+            [failed_action_log_message(DOC_ONE_ID, "update", "not_found")],
+        ),
+        (
+            [
+                successful_bulk_action(DOC_ONE_ID, "create", "created"),
+                successful_bulk_action(DOC_TWO_ID, "update", "updated"),
+                failed_bulk_action(DOC_THREE_ID, "update", "not_found"),
+            ],
+            [
+                successful_action_log_message(DOC_ONE_ID, "create", "created"),
+                successful_action_log_message(DOC_TWO_ID, "update", "updated"),
+                failed_action_log_message(DOC_THREE_ID, "update", "not_found"),
+            ],
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_should_log_bulk_operations_if_doc_id_tracing_is_enabled(
+    patch_logger, operation_results, expected_logs
+):
+    operations = []
+    client = Mock()
+    client.bulk_insert = AsyncMock(return_value={"items": operation_results})
+    sink = Sink(
+        client=client,
+        queue=Mock(),
+        chunk_size=0,
+        pipeline={"name": "pipeline"},
+        chunk_mem_size=0,
+        max_concurrency=0,
+        max_retries=3,
+        retry_interval=10,
+        enable_bulk_operations_logging=True,
+    )
+
+    await sink._batch_bulk(operations, STATS)
+
+    for log in expected_logs:
+        patch_logger.assert_present(log)
+
+
+@pytest.mark.asyncio
+async def test_should_log_error_when_id_is_missing(patch_logger):
+    operations = []
+    client = Mock()
+    # item missing id
+    item = {"index": {"result": "created"}}
+
+    client.bulk_insert = AsyncMock(
+        return_value={
+            "items": [item, successful_bulk_action(DOC_ONE_ID, "create", "created")]
+        }
+    )
+    sink = Sink(
+        client=client,
+        queue=Mock(),
+        chunk_size=0,
+        pipeline={"name": "pipeline"},
+        chunk_mem_size=0,
+        max_concurrency=0,
+        max_retries=3,
+        retry_interval=10,
+        enable_bulk_operations_logging=True,
+    )
+
+    await sink._batch_bulk(operations, STATS)
+
+    patch_logger.assert_present(f"Could not retrieve '_id' for document {item}")
+
+    # Should continue logging after a failure
+    patch_logger.assert_present(
+        successful_action_log_message(DOC_ONE_ID, "create", "created")
+    )
+
+
+@pytest.mark.asyncio
+async def test_should_log_error_when_unknown_action_item_returned(patch_logger):
+    operations = []
+    client = Mock()
+
+    # item with unknown action item
+    item = {"unknown": {"result": "created"}}
+
+    client.bulk_insert = AsyncMock(
+        return_value={
+            "items": [item, successful_bulk_action(DOC_ONE_ID, "create", "created")]
+        }
+    )
+    sink = Sink(
+        client=client,
+        queue=Mock(),
+        chunk_size=0,
+        pipeline={"name": "pipeline"},
+        chunk_mem_size=0,
+        max_concurrency=0,
+        max_retries=3,
+        retry_interval=10,
+        enable_bulk_operations_logging=True,
+    )
+
+    await sink._batch_bulk(operations, STATS)
+
+    patch_logger.assert_present(
+        f"Unknown action item returned from _bulk API for item {item}"
+    )
+
+    # Should continue logging after a failure
+    patch_logger.assert_present(
+        successful_action_log_message(DOC_ONE_ID, "create", "created")
+    )

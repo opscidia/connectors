@@ -54,7 +54,7 @@
 #elasticsearch.ssl: true
 #
 #
-##  Path to a CA bundle
+##  Path to a CA bundle, e.g. /path/to/ca.crt
 #elasticsearch.ca_certs: null
 #
 #
@@ -147,6 +147,17 @@
 #elasticsearch.bulk.retry_interval: 10
 #
 #
+##  Enable to log ids of created/indexed/deleted/updated documents during a sync.
+##    This will be logged on 'DEBUG' log level. Note: this depends on the service.log_level, not elasticsearch.log_level
+#elasticsearch.bulk.enable_operations_logging: false
+#
+## ------------------------------- Elasticsearch: Experimental ------------------------
+#
+##  Experimental configuration options for Elasticsearch interactions.
+#
+#
+##  Enable usage of Connectors API instead of calling connectors indices directly
+#elasticsearch.feature_use_connectors_api: false
 ## ------------------------------- Service ----------------------------------
 #
 ##  Connector service/framework related configurations

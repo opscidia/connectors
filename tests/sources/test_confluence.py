@@ -8,11 +8,12 @@ import ssl
 from contextlib import asynccontextmanager
 from copy import copy
 from unittest import mock
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import aiohttp
 import pytest
 from aiohttp import StreamReader
+from aiohttp.client_exceptions import ClientResponseError
 from freezegun import freeze_time
 
 from connectors.access_control import DLS_QUERY
@@ -24,6 +25,8 @@ from connectors.sources.confluence import (
     CONFLUENCE_SERVER,
     ConfluenceClient,
     ConfluenceDataSource,
+    InternalServerError,
+    NotFound,
 )
 from connectors.utils import ssl_context
 from tests.commons import AsyncIterator
@@ -49,6 +52,32 @@ RESPONSE_SPACE = {
     "_links": {},
 }
 
+SPACE = {
+    "id": 4554779,
+    "name": "DEMO",
+    "_links": {
+        "webui": "/spaces/DM",
+    },
+    "permissions": [
+        {
+            "id": 1,
+            "subjects": {
+                "group": {
+                    "results": [
+                        {
+                            "type": "group",
+                            "name": "group1",
+                            "id": "group_id_1",
+                        }
+                    ],
+                    "size": 1,
+                },
+            },
+            "operation": {"operation": "read", "targetType": "space"},
+        }
+    ],
+}
+
 RESPONSE_PAGE = {
     "results": [
         {
@@ -62,6 +91,7 @@ RESPONSE_PAGE = {
             "_links": {
                 "webui": "/spaces/~1234abc/pages/4779/ES-scrum",
             },
+            "ancestors": [{"title": "parent_title"}],
         }
     ],
     "start": 0,
@@ -71,21 +101,23 @@ RESPONSE_PAGE = {
 }
 
 EXPECTED_PAGE = {
-    "_id": 4779,
+    "_id": "4779",
     "type": "page",
     "_timestamp": "2023-01-24T04:07:19.672Z",
     "title": "ES-scrum",
+    "ancestors": [{"title": "parent_title"}],
     "body": "This is a test page",
     "space": "DEMO",
     "url": f"{HOST_URL}/spaces/~1234abc/pages/4779/ES-scrum",
+    "labels": [None],
 }
 
 EXPECTED_SPACE = {
     "_id": 4554779,
     "type": "Space",
     "title": "DEMO",
-    "_timestamp": "2023-01-24T04:07:19+00:00",
-    "url": f"{HOST_URL}/spaces/DM",
+    "_timestamp": "2024-04-02T09:53:15.818621+00:00",
+    "url": "http://127.0.0.1:9696/spaces/DM",
 }
 
 RESPONSE_ATTACHMENT = {
@@ -184,6 +216,7 @@ RESPONSE_SEARCH_RESULT = {
             "url": "/spaces/SD/pages/983046/Product+Details",
             "lastModified": "2022-12-19T13:06:18.000Z",
             "entityType": "content",
+            "ancestors": [{"title": "page1"}],
         },
         {
             "content": {
@@ -202,10 +235,11 @@ RESPONSE_SEARCH_RESULT = {
             "url": "/pages/viewpageattachments.action?pageId=196717&preview=%2F196717%2F4587521%2FPotential.pdf",
             "lastModified": "2023-01-24T03:34:38.000Z",
             "entityType": "content",
+            "ancestors": [],
         },
         {
             "space": {
-                "id": 196612,
+                "id": "196612",
                 "key": "SD",
                 "type": "global",
             },
@@ -214,11 +248,13 @@ RESPONSE_SEARCH_RESULT = {
             "url": "/spaces/SD",
             "lastModified": "2022-12-13T09:49:01.000Z",
             "entityType": "space",
+            "ancestors": [],
         },
     ]
 }
 
-EXPECTED_SEARCH_RESULT = [
+
+EXPECTED_SEARCH_RESULT_FOR_FILTERING = [
     {
         "_id": "983046",
         "title": "Product Details",
@@ -239,7 +275,7 @@ EXPECTED_SEARCH_RESULT = [
         "page": "Product Details",
     },
     {
-        "_id": 196612,
+        "_id": "196612",
         "title": "Software Development",
         "_timestamp": "2022-12-13T09:49:01.000Z",
         "body": "",
@@ -321,6 +357,18 @@ PAGE_RESTRICTION_RESPONSE = {
         "size": 2,
     },
     "group": {"results": [], "size": 0},
+}
+
+EXPECTED_QUERY_RESPONSE = {
+    "content": {
+        "id": "983041",
+        "type": "page",
+    },
+    "title": "page 3",
+    "excerpt": "page 3 excerpt",
+    "url": "/spaces/space1/pages/983041/page+3",
+    "entityType": "content",
+    "lastModified": "2024-04-24T08:43:17.000Z",
 }
 
 
@@ -464,6 +512,7 @@ async def test_validate_config_with_valid_dependency_fields_does_not_raise_error
     configs,
 ):
     async with create_confluence_source() as source:
+        source.confluence_client.ping = AsyncMock()
         for k, v in configs.items():
             source.configuration.get_field(k).value = v
 
@@ -639,6 +688,93 @@ async def test_validate_configuration_for_ssl_enabled():
             source._validate_configuration()
 
 
+@pytest.mark.asyncio
+@patch("connectors.utils.time_to_sleep_between_retries", Mock(return_value=0))
+async def test_get_with_429_status():
+    initial_response = ClientResponseError(None, None)
+    initial_response.status = 429
+    initial_response.message = "rate-limited"
+    initial_response.headers = {"Retry-After": 0.1}
+
+    retried_response = AsyncMock()
+    payload = {"value": "Test rate limit"}
+
+    retried_response.__aenter__ = AsyncMock(return_value=JSONAsyncMock(payload))
+    retried_response.__aexit__ = AsyncMock(return_value=None)
+    async with create_confluence_source() as source:
+        with patch(
+            "aiohttp.ClientSession.get",
+            side_effect=[initial_response, retried_response],
+        ):
+            async for response in source.confluence_client.api_call(
+                url="http://localhost:1000/sample"
+            ):
+                result = await response.json()
+
+    assert result == payload
+
+
+@pytest.mark.asyncio
+@patch("connectors.utils.time_to_sleep_between_retries", Mock(return_value=0))
+async def test_get_with_429_status_without_retry_after_header():
+    initial_response = ClientResponseError(None, None)
+    initial_response.status = 429
+    initial_response.message = "rate-limited"
+
+    retried_response = AsyncMock()
+    payload = {"value": "Test rate limit"}
+
+    retried_response.__aenter__ = AsyncMock(return_value=JSONAsyncMock(payload))
+    retried_response.__aexit__ = AsyncMock(return_value=None)
+    with patch("connectors.sources.confluence.DEFAULT_RETRY_SECONDS", 0):
+        async with create_confluence_source() as source:
+            with patch(
+                "aiohttp.ClientSession.get",
+                side_effect=[initial_response, retried_response],
+            ):
+                async for response in source.confluence_client.api_call(
+                    url="http://localhost:1000/sample"
+                ):
+                    result = await response.json()
+
+        assert result == payload
+
+
+@pytest.mark.asyncio
+async def test_get_with_404_status():
+    error = ClientResponseError(None, None)
+    error.status = 404
+
+    async with create_confluence_source() as source:
+        with patch(
+            "aiohttp.ClientSession.get",
+            side_effect=error,
+        ):
+            with pytest.raises(NotFound):
+                async for response in source.confluence_client.api_call(
+                    url="http://localhost:1000/err"
+                ):
+                    await response.json()
+
+
+@pytest.mark.asyncio
+@patch("connectors.utils.time_to_sleep_between_retries", Mock(return_value=0))
+async def test_get_with_500_status():
+    error = ClientResponseError(None, None)
+    error.status = 500
+
+    async with create_confluence_source() as source:
+        with patch(
+            "aiohttp.ClientSession.get",
+            side_effect=error,
+        ):
+            with pytest.raises(InternalServerError):
+                async for response in source.confluence_client.api_call(
+                    url="http://localhost:1000/err"
+                ):
+                    await response.json()
+
+
 @freeze_time("2023-01-24T04:07:19")
 @pytest.mark.asyncio
 async def test_fetch_spaces():
@@ -650,8 +786,8 @@ async def test_fetch_spaces():
         )
 
         with mock.patch("aiohttp.ClientSession.get", return_value=async_response):
-            async for response, _, _ in source.fetch_spaces():
-                assert response == EXPECTED_SPACE
+            async for response in source.confluence_client.fetch_spaces():
+                assert response == RESPONSE_SPACE["results"][0]
 
 
 @pytest.mark.asyncio
@@ -660,7 +796,7 @@ async def test_fetch_documents():
     async with create_confluence_source() as source:
         async_response = AsyncMock()
         async_response.__aenter__ = AsyncMock(return_value=JSONAsyncMock(RESPONSE_PAGE))
-
+        source.confluence_client.index_labels = True
         # Execute
         with mock.patch("aiohttp.ClientSession.get", return_value=async_response):
             async for response, _, _, _, _ in source.fetch_documents(api_query=""):
@@ -700,7 +836,24 @@ async def test_search_by_query():
                 query="type in ('space', 'page', 'attachment') AND space.key ='SD'"
             ):
                 documents.append(response)
-        assert documents == EXPECTED_SEARCH_RESULT
+        assert documents == EXPECTED_SEARCH_RESULT_FOR_FILTERING
+
+
+@pytest.mark.asyncio
+async def test_search_by_query_for_datacenter():
+    async with create_confluence_source() as source:
+        async_response = AsyncMock()
+        source.confluence_client.data_source_type = "confluence_data_center"
+        async_response.__aenter__ = AsyncMock(
+            return_value=JSONAsyncMock(RESPONSE_SEARCH_RESULT)
+        )
+        documents = []
+        with mock.patch("aiohttp.ClientSession.get", return_value=async_response):
+            async for response, _ in source.search_by_query(
+                query="type in ('space', 'page', 'attachment') AND space.key ='SD'"
+            ):
+                documents.append(response)
+        assert documents == EXPECTED_SEARCH_RESULT_FOR_FILTERING
 
 
 @pytest.mark.asyncio
@@ -832,9 +985,9 @@ async def test_download_attachment_with_text_extraction_enabled_adds_body():
 
 @pytest.mark.asyncio
 @mock.patch.object(
-    ConfluenceDataSource,
+    ConfluenceClient,
     "fetch_spaces",
-    return_value=AsyncIterator([[copy(EXPECTED_SPACE), [], "space_key"]]),
+    return_value=AsyncIterator([copy(SPACE)]),
 )
 @mock.patch.object(
     ConfluenceDataSource,
@@ -857,6 +1010,7 @@ async def test_download_attachment_with_text_extraction_enabled_adds_body():
     "download_attachment",
     return_value=AsyncIterator([[copy(EXPECTED_CONTENT)]]),
 )
+@freeze_time("2024-04-02T09:53:15.818621+00:00")
 async def test_get_docs(spaces_patch, pages_patch, attachment_patch, content_patch):
     """Tests the get_docs method"""
 
@@ -875,7 +1029,6 @@ async def test_get_docs(spaces_patch, pages_patch, attachment_patch, content_pat
         source.confluence_client.data_source_type = "confluence_cloud"
         async for item, _ in source.get_docs():
             documents.append(item)
-
         assert documents == expected_responses
 
 
@@ -1042,7 +1195,9 @@ async def test_get_access_control_dls_enabled_for_datacenter():
         source._dls_enabled = MagicMock(return_value=True)
         source.confluence_client.data_source_type = "confluence_data_center"
 
-        source.fetch_confluence_server_users = AsyncIterator([mock_users])
+        source.confluence_client.fetch_confluence_server_users = AsyncIterator(
+            [mock_users]
+        )
 
         user_documents = []
         async for user_doc in source.get_access_control():
@@ -1088,7 +1243,9 @@ async def test_get_access_control_dls_enabled_for_server():
     async with create_confluence_source() as source:
         source._dls_enabled = MagicMock(return_value=True)
 
-        source.fetch_confluence_server_users = AsyncIterator([mock_users])
+        source.confluence_client.fetch_confluence_server_users = AsyncIterator(
+            [mock_users]
+        )
 
         user_documents = []
         async for user_doc in source.get_access_control():
@@ -1103,17 +1260,15 @@ async def test_fetch_confluence_server_users():
         source.confluence_client.api_call = AsyncIterator(
             [JSONAsyncMock({"start": 0, "users": []})]
         )
-        async for user in source.fetch_confluence_server_users():
+        async for user in source.confluence_client.fetch_confluence_server_users():
             assert user is None
 
 
 @pytest.mark.asyncio
 @mock.patch.object(
-    ConfluenceDataSource,
+    ConfluenceClient,
     "fetch_spaces",
-    return_value=AsyncIterator(
-        [[copy(EXPECTED_SPACE), SPACE_PERMISSION_RESPONSE, "space_key"]]
-    ),
+    return_value=AsyncIterator(([copy(SPACE)])),
 )
 @mock.patch.object(
     ConfluenceDataSource,
@@ -1178,6 +1333,7 @@ async def test_fetch_confluence_server_users():
     "download_attachment",
     return_value=AsyncIterator([[copy(EXPECTED_CONTENT)]]),
 )
+@freeze_time("2024-04-02T09:53:15.818621+00:00")
 async def test_get_docs_dls_enabled(
     spaces_patch, pages_patch, attachment_patch, content_patch
 ):
@@ -1328,3 +1484,47 @@ async def test_get_permission():
 async def test_page_blog_coro(fetch_documents):
     async with create_confluence_source() as source:
         await source._page_blog_coro("api_query", "target")
+
+
+@pytest.mark.asyncio
+async def test_end_signal_is_added_to_queue_in_case_of_exception():
+    END_SIGNAL = "FINISHED_TASK"
+    async with create_confluence_source() as source:
+        with patch.object(
+            source,
+            "fetch_attachments",
+            side_effect=Exception("Error fetching attachments"),
+        ):
+            with pytest.raises(Exception):
+                await source._attachment_coro(document=EXPECTED_PAGE, access_control=[])
+                assert source.queue.get_nowait() == END_SIGNAL
+
+
+@pytest.mark.asyncio
+async def test_fetch_page_blog_documents_with_labels():
+    async with create_confluence_source() as source:
+        async_response = AsyncMock()
+        async_response.__aenter__ = AsyncMock(return_value=JSONAsyncMock(RESPONSE_PAGE))
+        with mock.patch(
+            "aiohttp.ClientSession.get", return_value=async_response
+        ), patch.object(
+            ConfluenceClient, "fetch_label", return_value=["label1", "label2"]
+        ):
+            source.confluence_client.index_labels = True
+            async for response, _ in source.confluence_client.fetch_page_blog_documents(
+                api_query="type in ('blogpost', 'page')"
+            ):
+                assert response == {
+                    "id": 4779,
+                    "title": "ES-scrum",
+                    "type": "page",
+                    "history": {"lastUpdated": {"when": "2023-01-24T04:07:19.672Z"}},
+                    "children": {"attachment": {"size": 2}},
+                    "body": {"storage": {"value": "This is a test page"}},
+                    "space": {"name": "DEMO"},
+                    "_links": {
+                        "webui": "/spaces/~1234abc/pages/4779/ES-scrum",
+                    },
+                    "ancestors": [{"title": "parent_title"}],
+                    "labels": ["label1", "label2"],
+                }

@@ -25,36 +25,30 @@ def mock_cli_config():
 
 @pytest.fixture(autouse=True)
 def mock_connector_es_client():
-    with patch("connectors.cli.connector.ESManagementClient") as mock:
+    with patch("connectors.cli.connector.CLIClient") as mock:
         mock.return_value = AsyncMock()
         yield mock
 
 
 @pytest.fixture(autouse=True)
 def mock_job_es_client():
-    with patch("connectors.cli.job.ESManagementClient") as mock:
+    with patch("connectors.cli.job.CLIClient") as mock:
         mock.return_value = AsyncMock()
         yield mock
 
 
-def test_version():
+@pytest.mark.parametrize("commands", [["-v"], ["--version"]])
+def test_version(commands):
     runner = CliRunner()
-    result = runner.invoke(cli, ["-v"])
+    result = runner.invoke(cli, commands)
     assert result.exit_code == 0
     assert result.output.strip() == __version__
 
 
-def test_help_page():
+@pytest.mark.parametrize("commands", [["-h"], ["--help"], []])
+def test_help_page(commands):
     runner = CliRunner()
-    result = runner.invoke(cli, ["--help"])
-    assert "Usage:" in result.output
-    assert "Options:" in result.output
-    assert "Commands:" in result.output
-
-
-def test_help_page_when_no_arguments():
-    runner = CliRunner()
-    result = runner.invoke(cli, [])
+    result = runner.invoke(cli, commands)
     assert "Usage:" in result.output
     assert "Options:" in result.output
     assert "Commands:" in result.output
@@ -548,13 +542,33 @@ def test_index_list_no_indexes():
 
 def test_index_list_one_index():
     runner = CliRunner()
-    indices = {"indices": {"test_index": {"primaries": {"docs": {"count": 10}}}}}
+    indices = {"test_index": {"docs_count": 10}}
 
     with patch(
-        "connectors.es.management_client.ESManagementClient.list_indices",
+        "connectors.es.cli_client.CLIClient.list_indices",
         AsyncMock(return_value=indices),
     ):
         result = runner.invoke(cli, ["index", "list"])
+
+    assert result.exit_code == 0
+    assert "test_index" in result.output
+
+
+def test_index_list_one_index_in_serverless():
+    runner = CliRunner()
+    indices = {"test_index": {"docs_count": 10}}
+
+    with patch(
+        "connectors.es.cli_client.CLIClient.list_indices"
+    ) as mocked_list_indices:
+        mocked_list_indices.side_effect = ApiError(
+            "api_not_available_exception", meta="meta", body="error"
+        )
+        with patch(
+            "connectors.es.cli_client.CLIClient.list_indices_serverless",
+            AsyncMock(return_value=indices),
+        ):
+            result = runner.invoke(cli, ["index", "list"])
 
     assert result.exit_code == 0
     assert "test_index" in result.output
@@ -565,7 +579,7 @@ def test_index_clean():
     runner = CliRunner()
     index_name = "test_index"
     with patch(
-        "connectors.es.management_client.ESManagementClient.clean_index",
+        "connectors.es.cli_client.CLIClient.clean_index",
         AsyncMock(return_value=True),
     ) as mocked_method:
         result = runner.invoke(cli, ["index", "clean", index_name])
@@ -580,7 +594,7 @@ def test_index_clean_error():
     runner = CliRunner()
     index_name = "test_index"
     with patch(
-        "connectors.es.management_client.ESManagementClient.clean_index",
+        "connectors.es.cli_client.CLIClient.clean_index",
         side_effect=ApiError(500, meta="meta", body="error"),
     ):
         result = runner.invoke(cli, ["index", "clean", index_name])
@@ -594,7 +608,7 @@ def test_index_delete():
     runner = CliRunner()
     index_name = "test_index"
     with patch(
-        "connectors.es.management_client.ESManagementClient.delete_indices",
+        "connectors.es.cli_client.CLIClient.delete_indices",
         AsyncMock(return_value=None),
     ) as mocked_method:
         result = runner.invoke(cli, ["index", "delete", index_name])
@@ -609,7 +623,7 @@ def test_delete_index_error():
     runner = CliRunner()
     index_name = "test_index"
     with patch(
-        "connectors.es.management_client.ESManagementClient.delete_indices",
+        "connectors.es.cli_client.CLIClient.delete_indices",
         side_effect=ApiError(500, meta="meta", body="error"),
     ):
         result = runner.invoke(cli, ["index", "delete", index_name])

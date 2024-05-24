@@ -19,11 +19,12 @@ PLATFORM='unknown'
 MAX_RSS="200M"
 MAX_DURATION=600
 
+export DOCKERFILE_FTEST_PATH=${DOCKERFILE_FTEST_PATH:-Dockerfile.ftest}
 export PERF8_TRACE=${PERF8_TRACE:-False}
 export REFRESH_RATE="${REFRESH_RATE:-5}"
 export DATA_SIZE="${DATA_SIZE:-medium}"
 export RUNNING_FTEST=True
-export VERSION='8.13.0-SNAPSHOT'
+export VERSION='8.15.0-SNAPSHOT'
 
 if [ "$PERF8_TRACE" == true ]; then
     echo 'Tracing is enabled, memray stats will be delivered'
